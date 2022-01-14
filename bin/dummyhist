@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+
+import sys
+import signal
+
+import ROOT
+import numpy as np
+from scipy.stats import wishart, multivariate_normal, dirichlet
+
+#__________________________________________________
+
+npeak  = 3
+ndata  = 10000
+alpha0 = 2.
+
+xmin = -10.
+xmax = 10.
+ymin = -10.
+ymax = 10.
+
+#__________________________________________________
+
+nu = 3
+W  = np.array([[2., 0.],
+               [0., 2.]])
+alpha = [alpha0 for _ in range(npeak)]
+
+#__________________________________________________
+
+class gauss2d:
+    x = None
+    y = None
+    S = None
+    r = None
+
+#__________________________________________________
+
+def handler(signal, frame):
+    print("KeyboardInterrupt. Exit from the process...")
+    sys.exit()
+
+#__________________________________________________
+
+def dump(n, x, y, pi):
+    buff = ""
+    buff += 50 * "_" + "\n"
+    buff += "DATA NUMBER: " + str(n) + "\n"
+    for i in range(npeak):
+        buff += f"    peak position: ({x[i]:>+4.2f}, {y[i]:>+4.2f}),"
+        buff += f"    mixing ratio: {pi[i]:>8.4f}\n"
+    print(buff)
+    return
+
+#__________________________________________________
+
+def dump(n, gcont):
+    buff = ""
+    buff += 50 * "_" + "\n"
+    buff += "DATA NUMBER: " + str(n) + "\n"
+    for g in gcont:
+        buff += f"    peak position: ({g.x:>+4.2f}, {g.y:>+4.2f}),"
+        buff += f"    mixing ratio: {g.r:>8.4f}\n"
+    print(buff)
+    return
+
+#__________________________________________________
+
+def drawPads(c):
+    c.cd()
+    cpad = ROOT.TPad("cpad", "cpad", 0., 0., 0.75, 0.75)
+    cpad.Draw()
+    rpad = ROOT.TPad("rpad", "rpad", 0.7, 0., 1., 0.75)
+    rpad.Draw()
+    tpad = ROOT.TPad("tpad", "tpad", 0., 0.7, 0.75, 1.)
+    tpad.Draw()
+    return cpad, rpad, tpad
+
+#__________________________________________________
+
+def drawHistograms(c, h, gcont):
+    cpad, rpad, tpad = drawPads(c)
+    hx = h.ProjectionX()
+    hy = h.ProjectionY()
+    cpad, rpad, tpad = drawPads(c)
+    cpad.cd()
+    h.Draw("col")
+    cpad.Update()
+    rpad.cd()
+    hy.SetFillColor(4)
+    hy.Draw("hbar")
+    tpad.cd()
+    hx.SetFillColor(4)
+    hx.Draw("bar")
+
+    cpad.cd()
+    l   = list()
+    txt = list()
+    for g in gcont:
+        l.append(ROOT.TLine(g.x, 1.5 * ymin, g.x, 1.5 * ymax))
+        l[-1].SetLineStyle(2)
+        l[-1].Draw()                     
+        l.append(ROOT.TLine(1.5 * xmin, g.y, 1.5 * xmax, g.y))
+        l[-1].SetLineStyle(2)
+        l[-1].Draw()
+        txt.append(ROOT.TText(g.x, g.y, f"{g.r:.4f}"))
+        txt[-1].Draw()
+    c.Update()
+
+#__________________________________________________
+
+def main():
+
+    ROOT.gROOT.SetBatch(0)
+    ROOT.gStyle.SetOptStat(0)
+    c = ROOT.TCanvas("c", "c", 600, 600)
+    n = 0
+
+    while True:
+
+        n += 1
+        title = f"h{n:01000d}"
+        h  = ROOT.TH2F(title, title, 100, 1.5 * xmin, 1.5 * xmax, 100, 1.5 * ymin, 1.5 * ymax)
+
+        pi = dirichlet.rvs(alpha)[0]
+
+        gcont = list()
+        for i in range(npeak):
+            g = gauss2d()
+            g.x = np.random.uniform(xmin, xmax)
+            g.y = np.random.uniform(ymin, ymax)
+            g.S = wishart.rvs(nu, W)
+            g.r = pi[i]
+            gcont.append(g)
+        dump(n, gcont)
+
+        for i in range(ndata):
+            dice = np.random.rand()
+            th = 0.
+            for g in gcont:
+                if th <= dice and dice < th + g.r:
+                    ix, iy = multivariate_normal.rvs([g.x, g.y], g.S)
+                    h.Fill(ix, iy)
+                th += g.r
+
+        drawHistograms(c, h, gcont)
+        input()
+
+#__________________________________________________
+
+signal.signal(signal.SIGINT, handler)
+main()
